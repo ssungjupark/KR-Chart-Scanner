@@ -20,17 +20,19 @@ def _validate_ohlcv(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
 
 
 def load_price_data(ticker: str, as_of: str, lookback_days: int = 550) -> pd.DataFrame:
-    """Load OHLCV data strictly up to as_of.
-
-    The dataframe is truncated again after download so historical tests cannot
-    accidentally see rows after the evaluation date.
-    """
+    """Load OHLCV data strictly up to as_of."""
     end = pd.Timestamp(as_of).normalize()
     start = end - timedelta(days=lookback_days)
 
     df = fdr.DataReader(ticker, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
     out = _validate_ohlcv(df, ticker)
     return out.loc[out.index <= end]
+
+
+def _range_dates(start: str, end: str, warmup_days: int, forward_days: int) -> tuple[pd.Timestamp, pd.Timestamp]:
+    start_ts = pd.Timestamp(start).normalize()
+    end_ts = pd.Timestamp(end).normalize()
+    return start_ts - timedelta(days=warmup_days), end_ts + timedelta(days=forward_days)
 
 
 def load_price_range(
@@ -40,19 +42,28 @@ def load_price_range(
     warmup_days: int = 550,
     forward_days: int = 60,
 ) -> pd.DataFrame:
-    """Load a research range with warm-up history and forward outcome rows.
-
-    Rows after `end` may exist only so the backtester can measure subsequent
-    returns. Signal scoring still slices the dataframe at each historical
-    evaluation date, preventing look-ahead through the scanner itself.
-    """
-    start_ts = pd.Timestamp(start).normalize()
-    end_ts = pd.Timestamp(end).normalize()
-    download_start = start_ts - timedelta(days=warmup_days)
-    download_end = end_ts + timedelta(days=forward_days)
-
+    """Load a research range with warm-up history and forward outcome rows."""
+    download_start, download_end = _range_dates(start, end, warmup_days, forward_days)
     df = fdr.DataReader(
         ticker,
+        download_start.strftime("%Y-%m-%d"),
+        download_end.strftime("%Y-%m-%d"),
+    )
+    return _validate_ohlcv(df, ticker)
+
+
+def load_delisted_price_range(
+    ticker: str,
+    start: str,
+    end: str,
+    warmup_days: int = 550,
+    forward_days: int = 60,
+) -> pd.DataFrame:
+    """Load OHLCV for a delisted KRX stock through FinanceDataReader."""
+    download_start, download_end = _range_dates(start, end, warmup_days, forward_days)
+    symbol = f"KRX-DELISTING:{ticker}"
+    df = fdr.DataReader(
+        symbol,
         download_start.strftime("%Y-%m-%d"),
         download_end.strftime("%Y-%m-%d"),
     )
@@ -77,5 +88,10 @@ def load_benchmark_range(
 
 def align_benchmark(stock: pd.DataFrame, benchmark: pd.DataFrame) -> pd.Series:
     """Align benchmark close to stock trading dates without future filling."""
-    bench_close = benchmark["Close"].reindex(stock.index).ffill()
-    return bench_close
+    return benchmark["Close"].reindex(stock.index).ffill()
+
+
+def align_benchmark_ohlc(stock: pd.DataFrame, benchmark: pd.DataFrame) -> pd.DataFrame:
+    """Align benchmark OHLC to stock dates for executable next-open outcome tests."""
+    cols = [c for c in ("Open", "High", "Low", "Close") if c in benchmark.columns]
+    return benchmark[cols].reindex(stock.index).ffill()
