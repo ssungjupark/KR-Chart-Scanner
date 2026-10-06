@@ -1,0 +1,50 @@
+name: Strategy pattern validation
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      max_symbols:
+        description: "0 = full current KOSPI/KOSDAQ universe"
+        required: false
+        default: "0"
+      workers:
+        description: "Parallel data workers"
+        required: false
+        default: "6"
+
+jobs:
+  compare-patterns:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Compare traditional chart setups
+        env:
+          MAX_SYMBOLS: ${{ github.event.inputs.max_symbols || '0' }}
+          WORKERS: ${{ github.event.inputs.workers || '6' }}
+        run: |
+          python strategy_validation.py \
+            --start 2022-01-03 --end 2026-09-04 \
+            --train-end 2023-12-28 --validation-end 2024-12-30 \
+            --min-adv 2000000000 --min-price 1000 --cooldown 20 \
+            --workers "$WORKERS" --max-symbols "$MAX_SYMBOLS"
+      - name: Show ranking
+        if: always()
+        run: |
+          cat output_strategy/strategy_ranking.csv 2>/dev/null || true
+          echo
+          cat output_strategy/failures.csv 2>/dev/null | head -30 || true
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: strategy-pattern-validation-results
+          path: output_strategy/
+          if-no-files-found: warn
