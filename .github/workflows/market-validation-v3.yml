@@ -1,0 +1,55 @@
+name: KRX validation v3
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      max_symbols:
+        description: "0 = full research universe"
+        required: false
+        default: "0"
+      workers:
+        description: "Parallel data workers"
+        required: false
+        default: "6"
+
+jobs:
+  validate-v3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run KRX validation v3
+        env:
+          MAX_SYMBOLS: ${{ github.event.inputs.max_symbols || '0' }}
+          WORKERS: ${{ github.event.inputs.workers || '6' }}
+        run: |
+          python market_validation_v3.py \
+            --start 2022-01-03 --end 2026-09-04 \
+            --train-end 2023-12-28 --validation-end 2024-12-30 \
+            --min-adv 2000000000 --min-price 1000 --min-score 60 \
+            --cooldown 20 --sample-every 10 \
+            --workers "$WORKERS" --max-symbols "$MAX_SYMBOLS"
+      - name: Show results
+        if: always()
+        run: |
+          cat output_market_v3/summary.csv 2>/dev/null || true
+          echo
+          cat output_market_v3/selected_weights.csv 2>/dev/null || true
+          echo
+          head -12 output_market_v3/model_selection.csv 2>/dev/null || true
+          echo
+          cat output_market_v3/failures.csv 2>/dev/null | head -30 || true
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: krx-validation-v3-results
+          path: output_market_v3/
+          if-no-files-found: warn
