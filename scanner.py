@@ -9,6 +9,31 @@ from config import ScannerConfig
 from indicators import higher_low
 
 
+REVERSAL_WEIGHTS: dict[str, int] = {
+    "higher_low": 15,
+    "sma20_rising": 15,
+    "sma60_flat_or_rising": 10,
+    "ma20_ma60_converged": 10,
+    "price_near_ma20": 5,
+    "price_near_ma60": 5,
+    "rsi_normal": 5,
+    "rs20_positive": 10,
+    "rs_trend_positive": 5,
+    "correction_volume_ok": 10,
+    "resistance_space_ok": 10,
+}
+
+
+def grade_for_score(score: int) -> str:
+    if score >= 80:
+        return "A"
+    if score >= 70:
+        return "B"
+    if score >= 60:
+        return "C"
+    return "D"
+
+
 @dataclass
 class ScanResult:
     ticker: str
@@ -23,6 +48,7 @@ def score_reversal(
     ticker: str,
     df: pd.DataFrame,
     cfg: ScannerConfig,
+    weights: dict[str, int] | None = None,
 ) -> ScanResult:
     if len(df) < cfg.min_history:
         raise ValueError(
@@ -71,32 +97,9 @@ def score_reversal(
         "resistance_space_ok": space_to_high60 >= cfg.resistance_space_min,
     }
 
-    # Initial weights. These are hypotheses, not truths. Backtesting will decide
-    # whether to keep, reduce or remove each factor.
-    weights = {
-        "higher_low": 15,
-        "sma20_rising": 15,
-        "sma60_flat_or_rising": 10,
-        "ma20_ma60_converged": 10,
-        "price_near_ma20": 5,
-        "price_near_ma60": 5,
-        "rsi_normal": 5,
-        "rs20_positive": 10,
-        "rs_trend_positive": 5,
-        "correction_volume_ok": 10,
-        "resistance_space_ok": 10,
-    }
-
-    score = sum(weights[name] for name, passed in checks.items() if passed)
-
-    if score >= 80:
-        grade = "A"
-    elif score >= 70:
-        grade = "B"
-    elif score >= 60:
-        grade = "C"
-    else:
-        grade = "D"
+    active_weights = weights or REVERSAL_WEIGHTS
+    score = sum(active_weights.get(name, 0) for name, passed in checks.items() if passed)
+    grade = grade_for_score(int(score))
 
     metrics = {
         "close": close,
