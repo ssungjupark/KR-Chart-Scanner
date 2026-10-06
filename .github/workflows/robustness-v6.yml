@@ -1,0 +1,239 @@
+name: Robustness diagnostics v6
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  robustness-v6:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run yearly, market and RS robustness diagnostics
+        run: |
+          python - <<'PY'
+          from concurrent.futures import ThreadPoolExecutor, as_completed
+          from itertools import product
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+
+          from data_loader import load_benchmark_range
+          from strategy_validation import _process_symbol, _cooldown, _stats, SETUPS, TRIGGERS
+          from universe import load_krx_universe_frame
+
+          START = "2022-01-03"
+          END = "2026-09-04"
+          TRAIN_END = pd.Timestamp("2023-12-28")
+          VALIDATION_END = pd.Timestamp("2024-12-30")
+          MIN_ADV = 2_000_000_000
+          MIN_PRICE = 1_000
+          COOLDOWN = 20
+          WORKERS = 6
+          RS20_GRID = (0.50, 0.60, 0.70, 0.80)
+          RS60_GRID = (0.60, 0.70, 0.80)
+          RS120_GRID = (0.60, 0.70, 0.80)
+
+          def raw_base(candidates, setup, trigger):
+              if setup == "leader20":
+                  base = candidates["BASE_LEADER20"]
+              elif setup == "leader60":
+                  base = candidates["BASE_LEADER60"]
+              elif setup == "leader_combo":
+                  base = candidates["BASE_LEADER20"] | candidates["BASE_LEADER60"]
+              else:
+                  base = candidates["BASE_REVERSAL"]
+              trig = {"ma5": "TRIG_MA5", "reclaim": "TRIG_RECLAIM", "break3": "TRIG_BREAK3"}[trigger]
+              mask = base & candidates[trig]
+              mask &= (candidates["RS20"] > 0) & (candidates["RS_RATIO_SLOPE"] > 0)
+              return candidates.loc[mask].copy()
+
+          def apply_model(base, rs20, rs60, rs120, bull_only):
+              mask = (
+                  (base["RS20_PCTL"] >= rs20)
+                  & (base["RS60_PCTL"] >= rs60)
+                  & (base["RS120_PCTL"] >= rs120)
+              )
+              if bull_only:
+                  mask &= base["MARKET_BULL"]
+              return _cooldown(base.loc[mask].copy(), COOLDOWN)
+
+          def fmt_pct(x):
+              return "NA" if x is None or not np.isfinite(x) else f"{x:+.2%}"
+
+          universe = load_krx_universe_frame()
+          universe = universe[universe["ticker"].astype(str).str.fullmatch(r"\d{6}")].copy()
+          print(f"Numeric-code universe: {len(universe):,}")
+
+          benchmarks = {
+              "KOSPI": load_benchmark_range("KS11", START, END, warmup_days=650, forward_days=75),
+              "KOSDAQ": load_benchmark_range("KQ11", START, END, warmup_days=650, forward_days=75),
+          }
+
+          ranks, candidates, failures = [], [], []
+          records = universe.to_dict("records")
+          with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+              futures = {
+                  pool.submit(_process_symbol, meta, benchmarks, START, END, MIN_ADV, MIN_PRICE): meta
+                  for meta in records
+              }
+              total = len(futures)
+              for i, fut in enumerate(as_completed(futures), 1):
+                  rank, cand, failure = fut.result()
+                  if not rank.empty:
+                      ranks.append(rank)
+                  if not cand.empty:
+                      candidates.append(cand)
+                  if failure:
+                      failures.append(failure)
+                  if i % 250 == 0 or i == total:
+                      print(f"Processed {i:,}/{total:,}; failures={len(failures)}")
+
+          rank_panel = pd.concat(ranks, ignore_index=True)
+          cand = pd.concat(candidates, ignore_index=True)
+          rank_panel["date"] = pd.to_datetime(rank_panel["date"])
+          cand["date"] = pd.to_datetime(cand["date"])
+
+          for h in (20, 60, 120):
+              rank_panel[f"RS{h}_PCTL"] = rank_panel.groupby(["date", "market"], sort=False)[f"RS{h}"].rank(pct=True)
+          key = rank_panel[["date", "ticker", "market", "RS20_PCTL", "RS60_PCTL", "RS120_PCTL"]]
+          cand = cand.merge(key, on=["date", "ticker", "market"], how="left", validate="many_to_one")
+          cand = cand[cand[["RS20_PCTL", "RS60_PCTL", "RS120_PCTL"]].notna().all(axis=1)].copy()
+          print(f"Rank observations: {len(rank_panel):,}; base candidates: {len(cand):,}")
+
+          grid_rows, selected_rows, selected_frames = [], [], []
+          yearly_rows, sensitivity_rows = [], []
+
+          for market in ("KOSPI", "KOSDAQ"):
+              m = cand[cand["market"] == market].copy()
+              cache = {(s, t): raw_base(m, s, t) for s, t in product(SETUPS, TRIGGERS)}
+
+              market_rows = []
+              for setup, trigger, r20, r60, r120, bull in product(
+                  SETUPS, TRIGGERS, RS20_GRID, RS60_GRID, RS120_GRID, (False, True)
+              ):
+                  chosen = apply_model(cache[(setup, trigger)], r20, r60, r120, bull)
+                  tr = chosen[chosen["date"] <= TRAIN_END]
+                  va = chosen[(chosen["date"] > TRAIN_END) & (chosen["date"] <= VALIDATION_END)]
+                  ts, vs = _stats(tr), _stats(va)
+                  min_alpha = min(ts["avg_excess_20d"], vs["avg_excess_20d"]) if (
+                      np.isfinite(ts["avg_excess_20d"]) and np.isfinite(vs["avg_excess_20d"])
+                  ) else np.nan
+                  row = {
+                      "market": market, "setup": setup, "trigger": trigger,
+                      "rs20_min": r20, "rs60_min": r60, "rs120_min": r120, "bull_only": bull,
+                      "train_signals": ts["signals"], "train_excess20": ts["avg_excess_20d"],
+                      "train_excess_win": ts["excess_win_rate_20d"], "train_mae20": ts["avg_mae_20d"],
+                      "validation_signals": vs["signals"], "validation_excess20": vs["avg_excess_20d"],
+                      "validation_excess_win": vs["excess_win_rate_20d"], "validation_mae20": vs["avg_mae_20d"],
+                      "min_alpha": min_alpha,
+                  }
+                  row["eligible_expectancy"] = bool(
+                      ts["signals"] >= 60 and vs["signals"] >= 25
+                      and ts["avg_excess_20d"] > 0 and vs["avg_excess_20d"] > 0
+                  )
+                  row["robust_score"] = (
+                      min_alpha + 0.25 * (ts["avg_excess_20d"] + vs["avg_excess_20d"])
+                      if np.isfinite(min_alpha) else -999.0
+                  )
+                  market_rows.append(row)
+                  grid_rows.append(row)
+
+              market_grid = pd.DataFrame(market_rows)
+              eligible = market_grid[market_grid["eligible_expectancy"]].sort_values(
+                  ["robust_score", "min_alpha", "validation_signals"], ascending=False
+              )
+              if eligible.empty:
+                  print(f"{market}: no positive-expectancy model in both train and validation")
+                  continue
+
+              best = eligible.iloc[0]
+              base = cache[(best["setup"], best["trigger"])]
+              chosen = apply_model(base, float(best["rs20_min"]), float(best["rs60_min"]), float(best["rs120_min"]), bool(best["bull_only"]))
+              holdout = chosen[chosen["date"] > VALIDATION_END].copy()
+              hs = _stats(holdout)
+              selected = best.to_dict()
+              selected.update({f"holdout_{k}": v for k, v in hs.items()})
+              selected_rows.append(selected)
+              selected_frames.append(holdout.assign(selected_market_model=market))
+
+              print("=" * 100)
+              print(
+                  f"{market} SELECTED: {best['setup']}/{best['trigger']} "
+                  f"RS20>={best['rs20_min']:.0%} RS60>={best['rs60_min']:.0%} "
+                  f"RS120>={best['rs120_min']:.0%} bull={bool(best['bull_only'])}"
+              )
+              print(
+                  f"train alpha={fmt_pct(best['train_excess20'])} n={int(best['train_signals'])}; "
+                  f"validation alpha={fmt_pct(best['validation_excess20'])} n={int(best['validation_signals'])}; "
+                  f"HOLDOUT alpha={fmt_pct(hs['avg_excess_20d'])} n={hs['signals']}"
+              )
+
+              for year in range(2022, 2027):
+                  y = chosen[chosen["date"].dt.year == year]
+                  ys = _stats(y)
+                  yearly_rows.append({"market": market, "year": year, **ys})
+                  alpha_win = "NA" if not np.isfinite(ys["excess_win_rate_20d"]) else f"{ys['excess_win_rate_20d']:.1%}"
+                  print(
+                      f"  {year}: n={ys['signals']:3d} avg20={fmt_pct(ys['avg_20d'])} "
+                      f"alpha={fmt_pct(ys['avg_excess_20d'])} alpha-win={alpha_win} "
+                      f"MAE={fmt_pct(ys['avg_mae_20d'])}"
+                  )
+
+              for floor in (0.50, 0.60, 0.70, 0.80):
+                  sens = apply_model(base, floor, floor, floor, bool(best["bull_only"]))
+                  for year in range(2022, 2027):
+                      sy = sens[sens["date"].dt.year == year]
+                      ss = _stats(sy)
+                      sensitivity_rows.append({
+                          "market": market, "setup": best["setup"], "trigger": best["trigger"],
+                          "bull_only": bool(best["bull_only"]), "rs_floor": floor, "year": year, **ss,
+                      })
+
+          grid = pd.DataFrame(grid_rows)
+          selected_df = pd.DataFrame(selected_rows)
+          yearly = pd.DataFrame(yearly_rows)
+          sensitivity = pd.DataFrame(sensitivity_rows)
+          holdout_all = pd.concat(selected_frames, ignore_index=True) if selected_frames else pd.DataFrame()
+
+          out = Path("output_robustness_v6")
+          out.mkdir(exist_ok=True)
+          grid.sort_values(["market", "robust_score"], ascending=[True, False]).to_csv(out / "model_grid.csv", index=False, encoding="utf-8-sig")
+          selected_df.to_csv(out / "selected_models.csv", index=False, encoding="utf-8-sig")
+          yearly.to_csv(out / "yearly_results.csv", index=False, encoding="utf-8-sig")
+          sensitivity.to_csv(out / "rs_floor_sensitivity.csv", index=False, encoding="utf-8-sig")
+          holdout_all.to_csv(out / "holdout_signals.csv", index=False, encoding="utf-8-sig")
+          pd.DataFrame({"failure": failures}).to_csv(out / "failures.csv", index=False, encoding="utf-8-sig")
+
+          print("=" * 100)
+          print("YEARLY RESULTS")
+          if not yearly.empty:
+              print(yearly[["market", "year", "signals", "avg_20d", "avg_excess_20d", "excess_win_rate_20d", "avg_mae_20d"]].to_string(index=False))
+          print("=" * 100)
+          print("RS FLOOR SENSITIVITY")
+          if not sensitivity.empty:
+              agg = sensitivity.groupby(["market", "rs_floor"]).agg(
+                  years=("year", "count"),
+                  total_signals=("signals", "sum"),
+                  mean_year_alpha=("avg_excess_20d", "mean"),
+                  min_year_alpha=("avg_excess_20d", "min"),
+                  positive_years=("avg_excess_20d", lambda s: int((s > 0).sum())),
+              ).reset_index()
+              print(agg.to_string(index=False))
+          print(f"Failures: {len(failures)}")
+          print(f"Saved to {out}/")
+          PY
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: robustness-v6-results
+          path: output_robustness_v6/
+          if-no-files-found: warn
