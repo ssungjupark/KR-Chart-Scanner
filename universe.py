@@ -36,6 +36,29 @@ def _clean_equity_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return out[~out["name"].map(_looks_like_preferred)]
 
 
+def _sector_metadata() -> pd.DataFrame:
+    """Best-effort current KRX sector metadata from the description listing."""
+    try:
+        desc = fdr.StockListing("KRX-DESC")
+    except Exception:
+        return pd.DataFrame(columns=["ticker", "sector", "industry"])
+    if desc is None or desc.empty:
+        return pd.DataFrame(columns=["ticker", "sector", "industry"])
+    code_col = next((c for c in ("Code", "Symbol", "Ticker") if c in desc.columns), None)
+    if code_col is None:
+        return pd.DataFrame(columns=["ticker", "sector", "industry"])
+    sector_col = next((c for c in ("Sector", "업종", "SectorName") if c in desc.columns), None)
+    industry_col = next((c for c in ("Industry", "주요제품", "IndustryName") if c in desc.columns), None)
+    out = pd.DataFrame({
+        "ticker": desc[code_col].astype(str).str.zfill(6),
+        "sector": desc[sector_col].astype(str) if sector_col else "UNKNOWN",
+        "industry": desc[industry_col].astype(str) if industry_col else "UNKNOWN",
+    })
+    out["sector"] = out["sector"].replace({"nan": "UNKNOWN", "": "UNKNOWN"}).fillna("UNKNOWN")
+    out["industry"] = out["industry"].replace({"nan": "UNKNOWN", "": "UNKNOWN"}).fillna("UNKNOWN")
+    return out.drop_duplicates("ticker")
+
+
 def load_krx_universe_frame(
     markets: tuple[str, ...] = ("KOSPI", "KOSDAQ"),
     max_symbols: int | None = None,
@@ -58,18 +81,23 @@ def load_krx_universe_frame(
     })
     frame = _clean_equity_frame(frame[frame["market"].isin(markets)])
     frame = frame.drop_duplicates("ticker").sort_values("ticker").reset_index(drop=True)
+    meta = _sector_metadata()
+    frame = frame.merge(meta, on="ticker", how="left")
+    frame["sector"] = frame["sector"].fillna("UNKNOWN")
+    frame["industry"] = frame["industry"].fillna("UNKNOWN")
     return frame.head(max_symbols).copy() if max_symbols and max_symbols > 0 else frame
 
 
 def _prepare_delisted(listing: pd.DataFrame, start: str, end: str, markets: tuple[str, ...]) -> pd.DataFrame:
+    cols = ["ticker", "name", "market", "source", "delisting_date", "sector", "industry"]
     if listing is None or listing.empty:
-        return pd.DataFrame(columns=["ticker", "name", "market", "source", "delisting_date"])
+        return pd.DataFrame(columns=cols)
     code_col = next((c for c in ("Symbol", "Code", "Ticker") if c in listing.columns), None)
     name_col = next((c for c in ("Name", "Company") if c in listing.columns), None)
     market_col = next((c for c in ("Market", "MarketId") if c in listing.columns), None)
     delist_col = next((c for c in ("DelistingDate", "DelistDate") if c in listing.columns), None)
     if not code_col or not name_col:
-        return pd.DataFrame(columns=["ticker", "name", "market", "source", "delisting_date"])
+        return pd.DataFrame(columns=cols)
     dates = pd.to_datetime(listing[delist_col], errors="coerce") if delist_col else pd.Series(pd.NaT, index=listing.index)
     market_values = listing[market_col].map(_normalize_market) if market_col else pd.Series("UNKNOWN", index=listing.index)
     frame = pd.DataFrame({
@@ -78,6 +106,8 @@ def _prepare_delisted(listing: pd.DataFrame, start: str, end: str, markets: tupl
         "market": market_values,
         "source": "delisted",
         "delisting_date": dates,
+        "sector": "UNKNOWN",
+        "industry": "UNKNOWN",
     })
     start_ts, end_ts = pd.Timestamp(start), pd.Timestamp(end)
     if frame["delisting_date"].notna().any():
@@ -102,8 +132,6 @@ def load_krx_research_universe(
             ranged = pd.DataFrame()
         delisted = _prepare_delisted(ranged, start, end, markets)
         if delisted.empty:
-            # Some FinanceDataReader/KRX combinations ignore or reject ranged listing arguments.
-            # Full-list fallback is slower but keeps the research universe reproducible.
             full = fdr.StockListing("KRX-DELISTING")
             delisted = _prepare_delisted(full, start, end, markets)
         if not delisted.empty:
