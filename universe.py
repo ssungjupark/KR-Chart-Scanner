@@ -35,6 +35,15 @@ def _looks_like_preferred(name: str) -> bool:
     return bool(re.search(r"우$|우B$|우C$|우\([A-Z0-9]+\)$", text) or re.search(r"\d우$", text))
 
 
+def _normalize_market(value: object) -> str:
+    text = str(value).strip().upper()
+    if "KOSDAQ" in text:
+        return "KOSDAQ"
+    if "KOSPI" in text:
+        return "KOSPI"
+    return text
+
+
 def _clean_equity_frame(frame: pd.DataFrame) -> pd.DataFrame:
     bad_pattern = r"스팩|SPAC|리츠|REIT|ETF|ETN"
     out = frame[~frame["name"].str.contains(bad_pattern, case=False, regex=True, na=False)].copy()
@@ -46,7 +55,6 @@ def load_krx_universe_frame(
     markets: tuple[str, ...] = ("KOSPI", "KOSDAQ"),
     max_symbols: int | None = None,
 ) -> pd.DataFrame:
-    """Return current KOSPI/KOSDAQ common-stock listings with market labels."""
     listing = fdr.StockListing("KRX")
     if listing is None or listing.empty:
         raise RuntimeError("FinanceDataReader returned an empty KRX listing")
@@ -57,7 +65,7 @@ def load_krx_universe_frame(
     if code_col is None or name_col is None:
         raise RuntimeError(f"Unexpected KRX listing columns: {list(listing.columns)}")
 
-    market_values = listing[market_col].astype(str) if market_col else pd.Series("UNKNOWN", index=listing.index)
+    market_values = listing[market_col].map(_normalize_market) if market_col else pd.Series("UNKNOWN", index=listing.index)
     frame = pd.DataFrame(
         {
             "ticker": listing[code_col].astype(str).str.zfill(6),
@@ -70,7 +78,6 @@ def load_krx_universe_frame(
     frame = frame[frame["market"].isin(markets)]
     frame = _clean_equity_frame(frame)
     frame = frame.drop_duplicates(subset=["ticker"]).sort_values("ticker").reset_index(drop=True)
-
     if max_symbols is not None and max_symbols > 0:
         frame = frame.head(max_symbols).copy()
     return frame
@@ -83,11 +90,6 @@ def load_krx_research_universe(
     include_delisted: bool = True,
     max_symbols: int | None = None,
 ) -> pd.DataFrame:
-    """Current equities plus stocks delisted during the research period.
-
-    Adding delisted names materially reduces survivorship bias versus using only
-    today's listing. It is still not a perfect point-in-time constituent database.
-    """
     current = load_krx_universe_frame(markets=markets, max_symbols=None)
     frames = [current]
 
@@ -103,7 +105,7 @@ def load_krx_research_universe(
             market_col = next((c for c in ("Market", "MarketId") if c in listing.columns), None)
             delist_col = next((c for c in ("DelistingDate", "DelistDate") if c in listing.columns), None)
             if code_col and name_col:
-                market_values = listing[market_col].astype(str) if market_col else pd.Series("UNKNOWN", index=listing.index)
+                market_values = listing[market_col].map(_normalize_market) if market_col else pd.Series("UNKNOWN", index=listing.index)
                 delisted = pd.DataFrame(
                     {
                         "ticker": listing[code_col].astype(str).str.zfill(6),
@@ -115,7 +117,6 @@ def load_krx_research_universe(
                 )
                 delisted = delisted[delisted["market"].isin(markets)]
                 delisted = _clean_equity_frame(delisted)
-                # Current listing wins on duplicate ticker codes.
                 delisted = delisted[~delisted["ticker"].isin(set(current["ticker"]))]
                 frames.append(delisted)
 
