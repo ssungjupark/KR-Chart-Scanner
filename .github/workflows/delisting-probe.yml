@@ -1,8 +1,6 @@
 name: Delisting schema probe
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -19,7 +17,6 @@ jobs:
         run: |
           python - <<'PY'
           import FinanceDataReader as fdr
-          import pandas as pd
           for args in [("KRX-DELISTING",), ("KRX-DELISTING", "2022-01-03", "2026-09-04")]:
               print("ARGS", args)
               try:
@@ -28,10 +25,6 @@ jobs:
                   if df is not None:
                       print("columns", list(df.columns))
                       print(df.head(5).to_string())
-                      for col in ["Market", "MarketId", "DelistingDate", "DelistDate", "Symbol", "Code", "Ticker"]:
-                          if col in df.columns:
-                              print(col, "sample=", df[col].dropna().astype(str).head(10).tolist())
-                              print(col, "unique=", df[col].dropna().astype(str).unique()[:20].tolist())
               except Exception as e:
                   print("ERROR", type(e).__name__, e)
           PY
