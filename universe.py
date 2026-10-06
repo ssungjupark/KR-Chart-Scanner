@@ -39,15 +39,14 @@ def _looks_like_preferred(name: str) -> bool:
     )
 
 
-def load_krx_universe(
+def load_krx_universe_frame(
     markets: tuple[str, ...] = ("KOSPI", "KOSDAQ"),
     max_symbols: int | None = None,
-) -> dict[str, str]:
-    """Return current KOSPI/KOSDAQ common-stock listings.
+) -> pd.DataFrame:
+    """Return current KOSPI/KOSDAQ common-stock listings with market labels.
 
-    The listing itself is current, so a historical backtest using this universe
-    still has survivorship bias. Liquidity filtering is applied later using only
-    information available on each historical signal date.
+    The listing itself is current, so historical research using this universe
+    still has survivorship bias. Signal-date liquidity is filtered separately.
     """
     listing = fdr.StockListing("KRX")
     if listing is None or listing.empty:
@@ -62,18 +61,34 @@ def load_krx_universe(
     frame = listing.copy()
     if market_col is not None:
         frame = frame[frame[market_col].astype(str).isin(markets)]
+        market_values = frame[market_col].astype(str)
+    else:
+        market_values = pd.Series("UNKNOWN", index=frame.index)
 
-    frame[code_col] = frame[code_col].astype(str).str.zfill(6)
-    frame[name_col] = frame[name_col].astype(str)
+    frame = pd.DataFrame(
+        {
+            "ticker": frame[code_col].astype(str).str.zfill(6),
+            "name": frame[name_col].astype(str),
+            "market": market_values,
+        }
+    )
 
     # Exclude obvious non-common-equity instruments by name. KRX StockListing
-    # usually contains listed equities, but this keeps the universe conservative.
+    # usually contains listed equities, but this keeps the research universe conservative.
     bad_pattern = r"스팩|SPAC|리츠|REIT|ETF|ETN"
-    frame = frame[~frame[name_col].str.contains(bad_pattern, case=False, regex=True, na=False)]
-    frame = frame[~frame[name_col].map(_looks_like_preferred)]
-    frame = frame.drop_duplicates(subset=[code_col]).sort_values(code_col)
+    frame = frame[~frame["name"].str.contains(bad_pattern, case=False, regex=True, na=False)]
+    frame = frame[~frame["name"].map(_looks_like_preferred)]
+    frame = frame.drop_duplicates(subset=["ticker"]).sort_values("ticker").reset_index(drop=True)
 
     if max_symbols is not None and max_symbols > 0:
-        frame = frame.head(max_symbols)
+        frame = frame.head(max_symbols).copy()
 
-    return dict(zip(frame[code_col], frame[name_col]))
+    return frame
+
+
+def load_krx_universe(
+    markets: tuple[str, ...] = ("KOSPI", "KOSDAQ"),
+    max_symbols: int | None = None,
+) -> dict[str, str]:
+    frame = load_krx_universe_frame(markets=markets, max_symbols=max_symbols)
+    return dict(zip(frame["ticker"], frame["name"]))
