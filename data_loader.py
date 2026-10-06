@@ -6,6 +6,19 @@ import FinanceDataReader as fdr
 import pandas as pd
 
 
+def _validate_ohlcv(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
+    if df is None or df.empty:
+        raise ValueError(f"No price data returned for ticker={ticker}")
+
+    out = df.copy()
+    out.index = pd.to_datetime(out.index)
+    required = {"Open", "High", "Low", "Close", "Volume"}
+    missing = required.difference(out.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {sorted(missing)}")
+    return out.sort_index()
+
+
 def load_price_data(ticker: str, as_of: str, lookback_days: int = 550) -> pd.DataFrame:
     """Load OHLCV data strictly up to as_of.
 
@@ -16,24 +29,50 @@ def load_price_data(ticker: str, as_of: str, lookback_days: int = 550) -> pd.Dat
     start = end - timedelta(days=lookback_days)
 
     df = fdr.DataReader(ticker, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
-    if df is None or df.empty:
-        raise ValueError(f"No price data returned for ticker={ticker}")
+    out = _validate_ohlcv(df, ticker)
+    return out.loc[out.index <= end]
 
-    df = df.copy()
-    df.index = pd.to_datetime(df.index)
-    df = df.loc[df.index <= end]
 
-    required = {"Open", "High", "Low", "Close", "Volume"}
-    missing = required.difference(df.columns)
-    if missing:
-        raise ValueError(f"Missing required columns: {sorted(missing)}")
+def load_price_range(
+    ticker: str,
+    start: str,
+    end: str,
+    warmup_days: int = 550,
+    forward_days: int = 60,
+) -> pd.DataFrame:
+    """Load a research range with warm-up history and forward outcome rows.
 
-    return df.sort_index()
+    Rows after `end` may exist only so the backtester can measure subsequent
+    returns. Signal scoring still slices the dataframe at each historical
+    evaluation date, preventing look-ahead through the scanner itself.
+    """
+    start_ts = pd.Timestamp(start).normalize()
+    end_ts = pd.Timestamp(end).normalize()
+    download_start = start_ts - timedelta(days=warmup_days)
+    download_end = end_ts + timedelta(days=forward_days)
+
+    df = fdr.DataReader(
+        ticker,
+        download_start.strftime("%Y-%m-%d"),
+        download_end.strftime("%Y-%m-%d"),
+    )
+    return _validate_ohlcv(df, ticker)
 
 
 def load_benchmark_data(symbol: str, as_of: str, lookback_days: int = 550) -> pd.DataFrame:
     """Load benchmark index data, e.g. KS11 for KOSPI."""
     return load_price_data(symbol, as_of, lookback_days)
+
+
+def load_benchmark_range(
+    symbol: str,
+    start: str,
+    end: str,
+    warmup_days: int = 550,
+    forward_days: int = 60,
+) -> pd.DataFrame:
+    """Load benchmark history for a panel backtest."""
+    return load_price_range(symbol, start, end, warmup_days, forward_days)
 
 
 def align_benchmark(stock: pd.DataFrame, benchmark: pd.DataFrame) -> pd.Series:
