@@ -1,0 +1,37 @@
+name: Delisting schema probe
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Inspect KRX delisted listing
+        run: |
+          python - <<'PY'
+          import FinanceDataReader as fdr
+          import pandas as pd
+          for args in [("KRX-DELISTING",), ("KRX-DELISTING", "2022-01-03", "2026-09-04")]:
+              print("ARGS", args)
+              try:
+                  df = fdr.StockListing(*args)
+                  print("shape", None if df is None else df.shape)
+                  if df is not None:
+                      print("columns", list(df.columns))
+                      print(df.head(5).to_string())
+                      for col in ["Market", "MarketId", "DelistingDate", "DelistDate", "Symbol", "Code", "Ticker"]:
+                          if col in df.columns:
+                              print(col, "sample=", df[col].dropna().astype(str).head(10).tolist())
+                              print(col, "unique=", df[col].dropna().astype(str).unique()[:20].tolist())
+              except Exception as e:
+                  print("ERROR", type(e).__name__, e)
+          PY
