@@ -1,0 +1,73 @@
+name: Reversal panel backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "Evaluation start date"
+        required: true
+        default: "2024-01-02"
+      end:
+        description: "Evaluation end date"
+        required: true
+        default: "2026-09-04"
+      min_score:
+        description: "Minimum signal score"
+        required: true
+        default: "60"
+      cooldown:
+        description: "Trading sessions between signals per stock"
+        required: true
+        default: "20"
+  push:
+    branches: [main]
+    paths:
+      - "backtest.py"
+      - "universe.py"
+      - "data_loader.py"
+      - "scanner.py"
+      - "indicators.py"
+      - "config.py"
+      - ".github/workflows/backtest.yml"
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run panel backtest
+        run: |
+          python backtest.py \
+            --start "${{ inputs.start || '2024-01-02' }}" \
+            --end "${{ inputs.end || '2026-09-04' }}" \
+            --min-score "${{ inputs.min_score || '60' }}" \
+            --cooldown "${{ inputs.cooldown || '20' }}"
+
+      - name: Show result files
+        if: always()
+        run: |
+          echo "Generated files:"
+          find output -maxdepth 1 -type f -print 2>/dev/null || true
+          echo
+          echo "Summary by score:"
+          cat output/backtest_summary_by_score.csv 2>/dev/null || true
+
+      - name: Upload backtest results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reversal-backtest-results
+          path: output/
+          if-no-files-found: warn
