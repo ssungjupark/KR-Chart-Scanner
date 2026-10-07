@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - robustness_v7.py
+      - robustness_v7_exact.py
       - .github/workflows/robustness-v7.yml
 
 jobs:
@@ -19,9 +20,9 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -r requirements.txt
-      - name: Run v7 entry, exit and regime robustness diagnostics
+      - name: Run exact v6 reproduction plus v7 diagnostics
         run: |
-          python robustness_v7.py \
+          python robustness_v7_exact.py \
             --start 2022-01-03 \
             --end 2026-09-04 \
             --train-end 2023-12-28 \
