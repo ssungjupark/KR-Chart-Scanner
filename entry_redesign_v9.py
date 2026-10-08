@@ -382,7 +382,7 @@ def analyze(args: argparse.Namespace) -> None:
             & (x["row_pos"] >= DEFAULT_CONFIG.min_history - 1)
             & (x["ADV20"] >= args.min_adv)
             & (x["filter_price"] >= args.min_price)
-            & x[["RS20", "RS60", "RS120", "RS_RATIO_SLOPE", "RS_RATIO_SLOPE_PREV5"]].notna().all(axis=1)
+            & x[["RS20", "RS60", "RS120", "RS_RATIO_SLOPE"]].notna().all(axis=1)
             & raw["Market"].eq("KOSPI")
         )
         valid = stock[["Open", "High", "Low", "Close", "Volume"]].gt(0).all(axis=1)
