@@ -1,0 +1,87 @@
+name: V10 KOSPI regime decomposition
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [research/v9-entry-redesign]
+    paths:
+      - regime_redesign_v10.py
+      - V10_REGIME_METHOD.md
+      - .github/workflows/regime-redesign-v10.yml
+
+jobs:
+  v10-regime-decomposition:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    env:
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-research.txt
+
+      - name: Compile and run existing tests
+        run: |
+          python -m py_compile regime_redesign_v10.py
+          python -m unittest discover -s tests -v
+
+      - name: Restore long-history research cache
+        id: cache-long
+        uses: actions/cache@v4
+        with:
+          path: |
+            data_kospi_long
+            data_kospi_amount
+          key: v10-kospi-long-${{ hashFiles('research/kospi-long-results/universe.csv', 'kospi_long_history.py', 'kospi_liquidity_data.py') }}
+          restore-keys: |
+            v9-kospi-long-
+
+      - name: Collect long KOSPI price history
+        if: steps.cache-long.outputs.cache-hit != 'true'
+        run: python kospi_long_history.py --phase collect --workers 16
+
+      - name: Collect historical KRX amount data
+        if: steps.cache-long.outputs.cache-hit != 'true'
+        run: python kospi_liquidity_data.py
+
+      - name: Run V10 regime decomposition
+        run: python regime_redesign_v10.py
+
+      - name: Require exact V6 baseline reproduction
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          x = pd.read_csv("research/v10-regime-results/v10_windows.csv")
+          r = x[(x.model == "v6_baseline") & (x.window == "all_pre2025")].iloc[0]
+          assert int(r.signals) == 1129, r.to_dict()
+          print("V6 baseline reproduced:", r.to_dict())
+          PY
+
+      - name: Show regime and model comparison
+        if: always()
+        run: |
+          echo "=== PRE-2025 MODEL RANKING ==="
+          cat research/v10-regime-results/v10_pre2025_ranking.csv 2>/dev/null || true
+          echo
+          echo "=== ADOPTION GATE ==="
+          cat research/v10-regime-results/v10_adoption_gate.csv 2>/dev/null || true
+          echo
+          echo "=== V6 PERIOD FEATURE SHIFT ==="
+          cat research/v10-regime-results/v10_v6_regime_feature_shift.csv 2>/dev/null || true
+          echo
+          echo "=== PORTFOLIO ==="
+          cat research/v10-regime-results/v10_portfolio_pre2025.csv 2>/dev/null || true
+
+      - name: Upload V10 results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v10-regime-decomposition-results
+          path: research/v10-regime-results/
+          if-no-files-found: warn
