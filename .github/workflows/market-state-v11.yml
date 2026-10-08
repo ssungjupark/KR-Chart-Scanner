@@ -1,0 +1,103 @@
+name: V11 KOSPI market-state robustness
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [research/v10-regime-decomposition]
+    paths:
+      - market_state_v11.py
+      - V11_MARKET_STATE_METHOD.md
+      - .github/workflows/market-state-v11.yml
+
+jobs:
+  v11-market-state:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    env:
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-research.txt
+
+      - name: Compile and run existing tests
+        run: |
+          python -m py_compile market_state_v11.py
+          python -m unittest discover -s tests -v
+
+      - name: Restore long-history research cache
+        id: cache-long
+        uses: actions/cache@v4
+        with:
+          path: |
+            data_kospi_long
+            data_kospi_amount
+          key: v11-kospi-long-${{ hashFiles('research/kospi-long-results/universe.csv', 'kospi_long_history.py', 'kospi_liquidity_data.py') }}
+          restore-keys: |
+            v10-kospi-long-
+            v9-kospi-long-
+
+      - name: Check restored research data
+        id: data-ready
+        shell: bash
+        run: |
+          if [ -f data_kospi_long/coverage.csv ] && [ -f data_kospi_long/KOSPI.csv.gz ] && [ "$(find data_kospi_amount -name '*.parquet' 2>/dev/null | wc -l)" -gt 0 ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Collect long KOSPI price history
+        if: steps.data-ready.outputs.ready != 'true'
+        run: python kospi_long_history.py --phase collect --workers 16
+
+      - name: Collect historical KRX amount data
+        if: steps.data-ready.outputs.ready != 'true'
+        run: python kospi_liquidity_data.py
+
+      - name: Run V11 market-state robustness
+        run: python market_state_v11.py
+
+      - name: Require exact V6 pre-2025 baseline reproduction
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          x = pd.read_csv("research/v11-market-state-results/v11_periods.csv")
+          r = x[(x.model == "v6_baseline") & (x.window == "all_pre2025")].iloc[0]
+          assert int(r.signals) == 1129, r.to_dict()
+          print("V6 baseline reproduced:", r.to_dict())
+          PY
+
+      - name: Show V11 comparison
+        if: always()
+        run: |
+          echo "=== PRE-2025 RANKING ==="
+          cat research/v11-market-state-results/v11_pre2025_ranking.csv 2>/dev/null || true
+          echo
+          echo "=== ROBUSTNESS GATE ==="
+          cat research/v11-market-state-results/v11_robustness_gate.csv 2>/dev/null || true
+          echo
+          echo "=== CORE PERIODS ==="
+          python - <<'PY'
+          import pandas as pd
+          p = "research/v11-market-state-results/v11_periods.csv"
+          try:
+              x = pd.read_csv(p)
+              print(x[x.model.eq("v6_core_b50_65_r0")].to_string(index=False))
+          except Exception as e:
+              print(e)
+          PY
+
+      - name: Upload V11 results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v11-market-state-results
+          path: research/v11-market-state-results/
+          if-no-files-found: warn
