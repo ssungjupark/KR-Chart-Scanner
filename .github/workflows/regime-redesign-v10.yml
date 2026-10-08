@@ -42,12 +42,23 @@ jobs:
           restore-keys: |
             v9-kospi-long-
 
+      - name: Check restored research data
+        id: data-ready
+        shell: bash
+        run: |
+          if [ -f data_kospi_long/coverage.csv ] && [ -f data_kospi_long/KOSPI.csv.gz ] && [ "$(find data_kospi_amount -name '*.parquet' 2>/dev/null | wc -l)" -gt 0 ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "Restored long-history data is complete enough to run V10."
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Collect long KOSPI price history
-        if: steps.cache-long.outputs.cache-hit != 'true'
+        if: steps.data-ready.outputs.ready != 'true'
         run: python kospi_long_history.py --phase collect --workers 16
 
       - name: Collect historical KRX amount data
-        if: steps.cache-long.outputs.cache-hit != 'true'
+        if: steps.data-ready.outputs.ready != 'true'
         run: python kospi_liquidity_data.py
 
       - name: Run V10 regime decomposition
