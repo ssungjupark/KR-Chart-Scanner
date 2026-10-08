@@ -59,21 +59,35 @@ def complete_benchmark_tail(symbol: str, benchmark: pd.DataFrame, end: str, cach
              "supplement_source": "none", "appended_rows": 0}
     if old_end < requested_end - pd.Timedelta(days=4):
         naver = "NAVER:KOSPI" if symbol == "KS11" else "NAVER:KOSDAQ"
-        supplement = load_price_range(naver, str((old_end - pd.Timedelta(days=10)).date()),
-                                      str(requested_end.date()), warmup_days=0, forward_days=0)
+        source_path = cache / f"{symbol}_naver_tail.csv.gz"
+        supplement = read_prices(source_path) if source_path.exists() else load_price_range(
+            naver, str((old_end - pd.Timedelta(days=10)).date()),
+            str(requested_end.date()), warmup_days=0, forward_days=0)
+        supplement.to_csv(source_path, compression="gzip", index_label="Date")
         overlap = benchmark.index.intersection(supplement.index)
-        if overlap.empty:
+        verified_overlap = overlap[overlap < old_end]
+        if verified_overlap.empty:
             raise ValueError("Benchmark supplement has no overlap to verify")
-        error = (benchmark.loc[overlap, "Close"] / supplement.loc[overlap, "Close"] - 1).abs().max()
+        error = (benchmark.loc[verified_overlap, "Close"] /
+                 supplement.loc[verified_overlap, "Close"] - 1).abs().max()
         if error > 0.001:
             raise ValueError(f"Benchmark sources disagree: {symbol} overlap error={error}")
-        tail = supplement.loc[supplement.index > old_end]
+        terminal_error = abs(float(benchmark.loc[old_end, "Close"] /
+                                   supplement.loc[old_end, "Close"] - 1)) if old_end in overlap else 0.
+        # The final stale cache bar can be an intraday snapshot. Correct it only
+        # when it lies AFTER the entry window, so frozen v6 ranks cannot change.
+        replace_terminal = old_end > pd.Timestamp(end) and old_end in overlap
+        if terminal_error > 0.001 and not replace_terminal:
+            raise ValueError("Partial benchmark candle falls inside frozen entry period")
+        tail = supplement.loc[supplement.index >= old_end] if replace_terminal else supplement.loc[supplement.index > old_end]
         if tail.empty:
             raise ValueError(f"Benchmark source remains stale: {symbol}")
-        benchmark = pd.concat([benchmark, tail]).sort_index()
+        prior = benchmark.loc[benchmark.index < old_end] if replace_terminal else benchmark
+        benchmark = pd.concat([prior, tail]).sort_index()
         benchmark.to_csv(cache / f"{symbol}.csv.gz", compression="gzip", index_label="Date")
         audit.update({"supplement_source": naver, "appended_rows": len(tail),
-                      "max_overlap_close_error": error})
+                      "max_overlap_close_error": error, "terminal_cache_close_error": terminal_error,
+                      "replaced_terminal_bar_after_entry_period": replace_terminal})
     audit["final_last_date"] = str(benchmark.index.max().date())
     return benchmark, audit
 

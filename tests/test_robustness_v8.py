@@ -1,8 +1,11 @@
 import unittest
+from unittest.mock import patch
+from pathlib import Path
+import tempfile
 import numpy as np
 import pandas as pd
 
-from robustness_v8 import COST, EXITS, choose_exit, metrics, outcomes, portfolio, select_model, split
+from robustness_v8 import COST, EXITS, choose_exit, complete_benchmark_tail, metrics, outcomes, portfolio, select_model, split
 
 
 def path():
@@ -122,6 +125,27 @@ class AccountingTests(unittest.TestCase):
         after, after_grid = select_model(f, pd.Timestamp("2023-12-28"), pd.Timestamp("2024-12-30"))
         self.assertEqual(selected, after)
         pd.testing.assert_frame_equal(grid, after_grid)
+
+
+class BenchmarkTests(unittest.TestCase):
+    def test_partial_terminal_cache_bar_is_corrected_after_entry_period(self):
+        supplement = path()
+        stale = supplement.iloc[:21].copy()
+        stale.loc[stale.index[-1], "Close"] = 99
+        with tempfile.TemporaryDirectory() as directory, patch(
+                "robustness_v8.load_price_range", return_value=supplement):
+            fresh, audit = complete_benchmark_tail("KS11", stale, "2024-01-05", Path(directory))
+        self.assertEqual(fresh.loc[stale.index[-1], "Close"], 100)
+        pd.testing.assert_frame_equal(fresh.iloc[:20], stale.iloc[:20])
+        self.assertTrue(audit["replaced_terminal_bar_after_entry_period"])
+
+    def test_disagreement_in_completed_overlap_fails(self):
+        stale = path().iloc[:21].copy()
+        stale.loc[stale.index[-2], "Close"] = 90
+        with tempfile.TemporaryDirectory() as directory, patch(
+                "robustness_v8.load_price_range", return_value=path()):
+            with self.assertRaisesRegex(ValueError, "sources disagree"):
+                complete_benchmark_tail("KS11", stale, "2024-01-05", Path(directory))
 
 
 if __name__ == "__main__":

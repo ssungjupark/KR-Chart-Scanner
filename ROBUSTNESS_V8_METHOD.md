@@ -29,6 +29,9 @@ they cannot suppress an entry or allow a replacement signal.
    extended to 2026-10-02. Append NAVER's observed KOSPI/KOSDAQ candles after
    checking overlap; preserve earlier candles and fail on missing outcome prices.
    Benchmark outcome windows must never fill a stale final price forward.
+   The final 2026-09-17 cache candle was also an intraday snapshot. Its completed
+   NAVER candle is substituted after verifying the preceding overlap is identical;
+   this date is after the frozen 2026-09-04 entry window.
 
 `avg_budget_ret` is weight * net trade return with unused cash earning zero.
 `avg_horizon_excess` subtracts the full-slot index return to the original fixed20
