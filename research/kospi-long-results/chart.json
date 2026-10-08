@@ -1,0 +1,119 @@
+{
+  "chartType": "line",
+  "meta": {
+    "title": "5년 구간별 평균 지수 초과수익",
+    "description": "1996~2024년, 기존 코스피 조건의 거래당 평균. 왕복 비용 0.4%, 각 구간 종료 전 청산한 거래만 집계.",
+    "footer": "25개 구간 중 23개가 음수입니다. 구간이 겹치므로 독립적인 25회 검증을 뜻하지 않습니다."
+  },
+  "xKey": "period",
+  "series": [
+    {
+      "dataKey": "excess",
+      "label": "평균 초과수익",
+      "valueSuffix": "%p",
+      "valueFormat": "raw"
+    }
+  ],
+  "data": [
+    {
+      "period": "1996~00",
+      "excess": -2.39
+    },
+    {
+      "period": "1997~01",
+      "excess": -2.84
+    },
+    {
+      "period": "1998~02",
+      "excess": -4.46
+    },
+    {
+      "period": "1999~03",
+      "excess": -2.36
+    },
+    {
+      "period": "2000~04",
+      "excess": -1.02
+    },
+    {
+      "period": "2001~05",
+      "excess": -0.27
+    },
+    {
+      "period": "2002~06",
+      "excess": -0.03
+    },
+    {
+      "period": "2003~07",
+      "excess": -0.31
+    },
+    {
+      "period": "2004~08",
+      "excess": -0.81
+    },
+    {
+      "period": "2005~09",
+      "excess": -1.07
+    },
+    {
+      "period": "2006~10",
+      "excess": -1.62
+    },
+    {
+      "period": "2007~11",
+      "excess": -1.37
+    },
+    {
+      "period": "2008~12",
+      "excess": -1.51
+    },
+    {
+      "period": "2009~13",
+      "excess": -1.29
+    },
+    {
+      "period": "2010~14",
+      "excess": -0.76
+    },
+    {
+      "period": "2011~15",
+      "excess": 0.12
+    },
+    {
+      "period": "2012~16",
+      "excess": -0.03
+    },
+    {
+      "period": "2013~17",
+      "excess": -0.25
+    },
+    {
+      "period": "2014~18",
+      "excess": -0.07
+    },
+    {
+      "period": "2015~19",
+      "excess": -0.11
+    },
+    {
+      "period": "2016~20",
+      "excess": -0.95
+    },
+    {
+      "period": "2017~21",
+      "excess": -0.79
+    },
+    {
+      "period": "2018~22",
+      "excess": -0.11
+    },
+    {
+      "period": "2019~23",
+      "excess": -0.66
+    },
+    {
+      "period": "2020~24",
+      "excess": 0.06
+    }
+  ]
+}

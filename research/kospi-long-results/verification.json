@@ -1,0 +1,8 @@
+{
+  "unit_tests_passed": 20,
+  "recent_v8_equity_reproduction": true,
+  "recent_net_account_return": 0.3266269716228771,
+  "independently_recomputed_trades": 60,
+  "all_price_histories_downloaded": 805,
+  "source_overlap_max_difference": 0.0
+}
