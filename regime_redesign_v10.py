@@ -8,11 +8,7 @@ import numpy as np
 import pandas as pd
 
 from config import DEFAULT_CONFIG
-from entry_redesign_v9 import (
-    MODEL_SPECS as V9_MODEL_SPECS,
-    add_v9_features,
-    entry_mask as v9_entry_mask,
-)
+from entry_redesign_v9 import add_v9_features
 from kospi_long_history import add_outcomes, bootstrap, repair_index_bars, replay, stats
 import robustness_v7 as v7
 
@@ -92,7 +88,15 @@ def leader_rs(panel: pd.DataFrame, loose: bool = False) -> pd.Series:
 def model_mask(panel: pd.DataFrame, spec: dict) -> pd.Series:
     family = spec["family"]
     if family == "v6":
-        return v9_entry_mask(panel, V9_MODEL_SPECS["v6_baseline"])
+        return (
+            panel["setup"].astype(bool)
+            & panel["trigger"].astype(bool)
+            & (panel["RS20"] > 0)
+            & (panel["RS_RATIO_SLOPE"] > 0)
+            & (panel["RS20_PCTL"] >= 0.50)
+            & (panel["RS60_PCTL"] >= 0.60)
+            & (panel["RS120_PCTL"] >= 0.70)
+        ).fillna(False)
 
     trend = panel["TREND_STACK"].astype(bool)
     rs = leader_rs(panel)
