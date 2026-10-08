@@ -1,0 +1,105 @@
+name: V13 KOSPI leadership concentration
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [research/v12-generalized-regime]
+    paths:
+      - leadership_concentration_v13.py
+      - V13_LEADERSHIP_CONCENTRATION_METHOD.md
+      - .github/workflows/leadership-concentration-v13.yml
+
+jobs:
+  v13-leadership-concentration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    env:
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-research.txt
+
+      - name: Compile and run existing tests
+        run: |
+          python -m py_compile leadership_concentration_v13.py
+          python -m unittest discover -s tests -v
+
+      - name: Restore long-history research cache
+        id: cache-long
+        uses: actions/cache@v4
+        with:
+          path: |
+            data_kospi_long
+            data_kospi_amount
+          key: v13-kospi-long-${{ hashFiles('research/kospi-long-results/universe.csv', 'kospi_long_history.py', 'kospi_liquidity_data.py') }}
+          restore-keys: |
+            v12-kospi-long-
+            v11-kospi-long-
+            v10-kospi-long-
+
+      - name: Check restored research data
+        id: data-ready
+        shell: bash
+        run: |
+          if [ -f data_kospi_long/coverage.csv ] && [ -f data_kospi_long/KOSPI.csv.gz ] && [ "$(find data_kospi_amount -name '*.parquet' 2>/dev/null | wc -l)" -gt 0 ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Collect long KOSPI price history
+        if: steps.data-ready.outputs.ready != 'true'
+        run: python kospi_long_history.py --phase collect --workers 16
+
+      - name: Collect historical KRX amount data
+        if: steps.data-ready.outputs.ready != 'true'
+        run: python kospi_liquidity_data.py
+
+      - name: Run V13 leadership concentration research
+        run: python leadership_concentration_v13.py
+
+      - name: Require exact V6 pre-2025 baseline reproduction
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          x = pd.read_csv("research/v13-leadership-concentration-results/v13_periods.csv")
+          r = x[(x.model == "v6_baseline") & (x.window == "all_pre2025")].iloc[0]
+          assert int(r.signals) == 1129, r.to_dict()
+          print("V6 baseline reproduced:", r.to_dict())
+          PY
+
+      - name: Show V13 comparison
+        if: always()
+        run: |
+          echo "=== PRE-2025 RANKING ==="
+          cat research/v13-leadership-concentration-results/v13_pre2025_ranking.csv 2>/dev/null || true
+          echo
+          echo "=== GATE ==="
+          cat research/v13-leadership-concentration-results/v13_gate.csv 2>/dev/null || true
+          echo
+          echo "=== 2025-2026 REUSED ==="
+          python - <<'PY'
+          import pandas as pd
+          p = "research/v13-leadership-concentration-results/v13_periods.csv"
+          try:
+              x = pd.read_csv(p)
+              cols = ["model", "signals", "mean_net", "mean_excess", "excess_win_rate", "top3_removed_excess"]
+              print(x[x.window.eq("2025_2026_reused")][cols].sort_values("mean_excess", ascending=False).to_string(index=False))
+          except Exception as e:
+              print(e)
+          PY
+
+      - name: Upload V13 results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v13-leadership-concentration-results
+          path: research/v13-leadership-concentration-results/
+          if-no-files-found: warn
