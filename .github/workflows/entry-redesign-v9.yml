@@ -1,0 +1,81 @@
+name: V9 KOSPI entry redesign
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [research/kospi-long-history]
+    paths:
+      - entry_redesign_v9.py
+      - tests/test_entry_redesign_v9.py
+      - V9_ENTRY_REDESIGN_METHOD.md
+      - .github/workflows/entry-redesign-v9.yml
+
+jobs:
+  v9-entry-redesign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    env:
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-research.txt
+
+      - name: Unit and accounting tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Restore long-history research cache
+        id: cache-long
+        uses: actions/cache@v4
+        with:
+          path: |
+            data_kospi_long
+            data_kospi_amount
+          key: v9-kospi-long-${{ hashFiles('research/kospi-long-results/universe.csv', 'kospi_long_history.py', 'kospi_liquidity_data.py') }}
+
+      - name: Collect long KOSPI price history
+        if: steps.cache-long.outputs.cache-hit != 'true'
+        run: python kospi_long_history.py --phase collect --workers 16
+
+      - name: Collect historical KRX amount data
+        if: steps.cache-long.outputs.cache-hit != 'true'
+        run: python kospi_liquidity_data.py
+
+      - name: Run V9 entry redesign
+        run: python entry_redesign_v9.py
+
+      - name: Require exact V6 baseline reproduction
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          x = pd.read_csv("research/v9-entry-results/v9_periods.csv")
+          r = x[(x.model == "v6_baseline") & (x.period == "all_pre2025")].iloc[0]
+          assert int(r.signals) == 1129, r.to_dict()
+          print("V6 baseline reproduced:", r.to_dict())
+          PY
+
+      - name: Show comparison
+        if: always()
+        run: |
+          echo "=== PRE-2025 COMPARISON ==="
+          cat research/v9-entry-results/v9_pre2025_comparison.csv 2>/dev/null || true
+          echo
+          echo "=== ADOPTION GATE ==="
+          cat research/v9-entry-results/v9_adoption_gate.csv 2>/dev/null || true
+          echo
+          echo "=== PORTFOLIO ==="
+          cat research/v9-entry-results/v9_portfolio_pre2025.csv 2>/dev/null || true
+
+      - name: Upload V9 results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v9-entry-redesign-results
+          path: research/v9-entry-results/
+          if-no-files-found: warn
