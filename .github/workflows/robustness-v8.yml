@@ -1,0 +1,60 @@
+name: Robustness diagnostics v8
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, research/robustness-v7]
+    paths:
+      - robustness_v8.py
+      - tests/test_robustness_v8.py
+      - .github/workflows/robustness-v8.yml
+
+jobs:
+  robustness-v8:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      actions: read
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Restore frozen v6 input snapshot when available
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: robustness-v8-input-data
+          run-id: 37737614391
+          github-token: ${{ github.token }}
+          path: data_robustness_v8
+      - name: Verify execution timing, cash accounting and model selection
+        run: python -m unittest discover -s tests -v
+      - name: Run fixed v6 entries with v8 sizing and exits
+        run: python robustness_v8.py
+      - name: Freeze dependency versions
+        if: always()
+        run: |
+          mkdir -p output_robustness_v8
+          pip freeze > output_robustness_v8/dependencies.txt
+      - name: Upload v8 results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: robustness-v8-results
+          path: output_robustness_v8/
+          if-no-files-found: warn
+      - name: Preserve exact input data for reproducible comparisons
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: robustness-v8-input-data
+          path: data_robustness_v8/
+          retention-days: 90
+          compression-level: 0
+          if-no-files-found: warn

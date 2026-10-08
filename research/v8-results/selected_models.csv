@@ -1,0 +1,3 @@
+market,sizing,exit,status
+KOSPI,equal,fixed20,fallback_v6
+KOSDAQ,equal,fixed20,fallback_v6

@@ -1,0 +1,3 @@
+symbol,original_last_date,supplement_source,appended_rows,max_overlap_close_error,terminal_cache_close_error,replaced_terminal_bar_after_entry_period,final_last_date
+KS11,2026-09-17,NAVER:KOSPI,12,0.0,0.0013297773330296359,True,2026-10-07
+KQ11,2026-09-17,NAVER:KOSDAQ,12,0.0,0.0006203021236225181,True,2026-10-07
