@@ -46,6 +46,38 @@ def cached_prices(symbol: str, start: str, end: str, cache: Path,
     return x
 
 
+def complete_benchmark_tail(symbol: str, benchmark: pd.DataFrame, end: str, cache: Path):
+    """Append observed NAVER index candles when the upstream KRX cache is stale.
+
+    Do not rewrite historical candles that defined v6 entry ranks. Compare overlap
+    before joining sources; save the new observations for subsequent reruns.
+    """
+    completed_day = pd.Timestamp.now().normalize() - pd.Timedelta(days=1)
+    requested_end = min(pd.Timestamp(end) + pd.Timedelta(days=75), completed_day)
+    old_end = benchmark.index.max()
+    audit = {"symbol": symbol, "original_last_date": str(old_end.date()),
+             "supplement_source": "none", "appended_rows": 0}
+    if old_end < requested_end - pd.Timedelta(days=4):
+        naver = "NAVER:KOSPI" if symbol == "KS11" else "NAVER:KOSDAQ"
+        supplement = load_price_range(naver, str((old_end - pd.Timedelta(days=10)).date()),
+                                      str(requested_end.date()), warmup_days=0, forward_days=0)
+        overlap = benchmark.index.intersection(supplement.index)
+        if overlap.empty:
+            raise ValueError("Benchmark supplement has no overlap to verify")
+        error = (benchmark.loc[overlap, "Close"] / supplement.loc[overlap, "Close"] - 1).abs().max()
+        if error > 0.001:
+            raise ValueError(f"Benchmark sources disagree: {symbol} overlap error={error}")
+        tail = supplement.loc[supplement.index > old_end]
+        if tail.empty:
+            raise ValueError(f"Benchmark source remains stale: {symbol}")
+        benchmark = pd.concat([benchmark, tail]).sort_index()
+        benchmark.to_csv(cache / f"{symbol}.csv.gz", compression="gzip", index_label="Date")
+        audit.update({"supplement_source": naver, "appended_rows": len(tail),
+                      "max_overlap_close_error": error})
+    audit["final_last_date"] = str(benchmark.index.max().date())
+    return benchmark, audit
+
+
 def process_symbol(meta: dict, benchmarks: dict, args: argparse.Namespace, cache: Path):
     ticker, market = str(meta["ticker"]), meta["market"]
     try:
@@ -114,8 +146,10 @@ def choose_exit(x: pd.DataFrame, signal_pos: int, method: str) -> tuple[int, str
 
 
 def outcomes(x: pd.DataFrame, benchmark: pd.DataFrame, signal_pos: int) -> dict:
-    bench = align_benchmark_ohlc(x, benchmark)
     entry = signal_pos + 1
+    bench = benchmark.reindex(x.index)
+    if bench.iloc[entry:signal_pos + 21][["Open", "Close"]].isna().any().any():
+        raise ValueError("Benchmark outcome window contains missing observed prices; no forward filling")
     ep, bep = float(x["Open"].iloc[entry]), float(bench["Open"].iloc[entry])
     row = {"ENTRY_DATE": x.index[entry], "ENTRY_PRICE": ep}
     for method in EXITS:
@@ -293,8 +327,12 @@ def run(args: argparse.Namespace):
         universe = load_krx_universe_frame()
         universe = universe[universe["ticker"].astype(str).str.fullmatch(r"\d{6}")].copy()
         write_csv(universe, universe_path)
-    benchmarks = {m: cached_prices(s, args.start, args.end, cache, True)
-                  for m, s in (("KOSPI", "KS11"), ("KOSDAQ", "KQ11"))}
+    benchmarks, benchmark_audit = {}, []
+    for market, symbol in (("KOSPI", "KS11"), ("KOSDAQ", "KQ11")):
+        benchmark = cached_prices(symbol, args.start, args.end, cache, True)
+        benchmarks[market], audit = complete_benchmark_tail(symbol, benchmark, args.end, cache)
+        benchmark_audit.append(audit)
+    write_csv(pd.DataFrame(benchmark_audit), out / "benchmark_tail_audit.csv")
     ranks, candidates, failures = [], [], []
     print(f"Numeric-code universe: {len(universe)}", flush=True)
     with ThreadPoolExecutor(max_workers=args.workers) as pool:

@@ -52,6 +52,11 @@ class ExecutionTests(unittest.TestCase):
         x.loc[x.index[4]:, "Close"] = 10000
         self.assertEqual(before, choose_exit(x, 0, "profit10_dd5"))
 
+    def test_missing_benchmark_candle_cannot_be_forward_filled(self):
+        b = path().drop(path().index[15])
+        with self.assertRaisesRegex(ValueError, "missing observed prices"):
+            outcomes(path(), b, 0)
+
 
 class AccountingTests(unittest.TestCase):
     def signals(self, end_phase):

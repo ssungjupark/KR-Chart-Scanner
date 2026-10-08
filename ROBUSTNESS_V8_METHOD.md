@@ -25,6 +25,10 @@ they cannot suppress an entry or allow a replacement signal.
 4. Report 2025-26 as reused evaluation, since previous versions already examined
    these years. It is no longer an untouched holdout. Do not retune using results.
 5. Preserve CSV price snapshots, universe snapshot, dependencies and SHA256 hashes.
+6. The KRX index cache originally stopped on 2026-09-17 while one stock outcome
+   extended to 2026-10-02. Append NAVER's observed KOSPI/KOSDAQ candles after
+   checking overlap; preserve earlier candles and fail on missing outcome prices.
+   Benchmark outcome windows must never fill a stale final price forward.
 
 `avg_budget_ret` is weight * net trade return with unused cash earning zero.
 `avg_horizon_excess` subtracts the full-slot index return to the original fixed20
@@ -49,6 +53,9 @@ Live scanner files are unaffected. This PR is stacked on the v7 research branch.
 `selected_models.csv`, `holdout_comparison.csv` (reused evaluation),
 `yearly_comparison.csv`, `signal_attribution.csv`, `portfolio_comparison.csv`,
 daily equity CSVs, `manifest.json`, `dependencies.txt`, `failures.csv`.
+`benchmark_tail_audit.csv` records the benchmark freshness correction.
 
 Run `python -m unittest discover -s tests -v` then `python robustness_v8.py`.
 The GitHub workflow saves both reports and the exact downloaded inputs.
+It attempts to restore the first v8 input artifact before downloading again;
+if that artifact has expired, it downloads fresh data and rechecks v6 counts.
