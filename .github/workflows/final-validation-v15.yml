@@ -1,0 +1,99 @@
+name: V15 final frozen validation
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [research/v14-index-distortion]
+    paths:
+      - final_validation_v15.py
+      - V15_FINAL_VALIDATION_METHOD.md
+      - tests/test_final_validation_v15.py
+      - .github/workflows/final-validation-v15.yml
+
+jobs:
+  v15-final-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    env:
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-research.txt
+
+      - name: Compile and run tests
+        run: |
+          python -m py_compile final_validation_v15.py
+          python -m unittest discover -s tests -v
+
+      - name: Restore long-history research cache
+        id: cache-long
+        uses: actions/cache@v4
+        with:
+          path: |
+            data_kospi_long
+            data_kospi_amount
+          key: v15-kospi-long-${{ hashFiles('research/kospi-long-results/universe.csv', 'kospi_long_history.py', 'kospi_liquidity_data.py') }}
+          restore-keys: |
+            v14-kospi-long-
+            v13-kospi-long-
+
+      - name: Check restored research data
+        id: data-ready
+        shell: bash
+        run: |
+          if [ -f data_kospi_long/coverage.csv ] && [ -f data_kospi_long/KOSPI.csv.gz ] && [ "$(find data_kospi_amount -name '*.parquet' 2>/dev/null | wc -l)" -gt 0 ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Collect long KOSPI price history
+        if: steps.data-ready.outputs.ready != 'true'
+        run: python kospi_long_history.py --phase collect --workers 16
+
+      - name: Collect historical KRX amount data
+        if: steps.data-ready.outputs.ready != 'true'
+        run: python kospi_liquidity_data.py
+
+      - name: Run V15 final validation
+        run: python final_validation_v15.py
+
+      - name: Require frozen candidate reproduction
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          x = pd.read_csv("research/v15-final-validation-results/v15_periods.csv")
+          pre = x[x.window.eq("all_pre2025")].iloc[0]
+          reused = x[x.window.eq("2025_2026_reused")].iloc[0]
+          assert int(pre.signals) == 208, pre.to_dict()
+          assert int(reused.signals) == 20, reused.to_dict()
+          print("Frozen candidate reproduced:", pre.to_dict())
+          print("Reused evaluation reproduced:", reused.to_dict())
+          PY
+
+      - name: Show final verdict
+        if: always()
+        run: |
+          echo "=== FINAL GATE ==="
+          cat research/v15-final-validation-results/v15_final_gate.csv 2>/dev/null || true
+          echo
+          echo "=== COST ==="
+          cat research/v15-final-validation-results/v15_cost_sensitivity.csv 2>/dev/null || true
+          echo
+          echo "=== PORTFOLIO ==="
+          cat research/v15-final-validation-results/v15_portfolio.csv 2>/dev/null || true
+
+      - name: Upload V15 results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v15-final-validation-results
+          path: research/v15-final-validation-results/
+          if-no-files-found: warn
