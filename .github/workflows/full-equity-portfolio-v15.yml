@@ -1,0 +1,96 @@
+name: V15 full-equity portfolio comparison
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [research/v15-final-validation]
+    paths:
+      - full_equity_portfolio_v15.py
+      - tests/test_full_equity_portfolio_v15.py
+      - .github/workflows/full-equity-portfolio-v15.yml
+
+jobs:
+  v15-full-equity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    env:
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-research.txt
+
+      - name: Compile and run tests
+        run: |
+          python -m py_compile full_equity_portfolio_v15.py
+          python -m unittest discover -s tests -v
+
+      - name: Restore long-history research cache
+        id: cache-long
+        uses: actions/cache@v4
+        with:
+          path: |
+            data_kospi_long
+            data_kospi_amount
+          key: v15-full-equity-${{ hashFiles('research/kospi-long-results/universe.csv', 'kospi_long_history.py', 'kospi_liquidity_data.py') }}
+          restore-keys: |
+            v15-kospi-long-
+            v14-kospi-long-
+
+      - name: Check restored research data
+        id: data-ready
+        shell: bash
+        run: |
+          if [ -f data_kospi_long/coverage.csv ] && [ -f data_kospi_long/KOSPI.csv.gz ] && [ "$(find data_kospi_amount -name '*.parquet' 2>/dev/null | wc -l)" -gt 0 ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Collect long KOSPI price history
+        if: steps.data-ready.outputs.ready != 'true'
+        run: python kospi_long_history.py --phase collect --workers 16
+
+      - name: Collect historical KRX amount data
+        if: steps.data-ready.outputs.ready != 'true'
+        run: python kospi_liquidity_data.py
+
+      - name: Run fully-invested comparison
+        run: python full_equity_portfolio_v15.py
+
+      - name: Require full equity exposure
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          s = pd.read_csv("research/v15-full-equity-results/full_equity_summary.csv")
+          overlays = s[s.model.str.startswith("signal_overlay_")]
+          assert len(overlays) == 3, s
+          assert (overlays.avg_total_equity_exposure.sub(1).abs() < 1e-9).all(), overlays
+          print(overlays.to_string(index=False))
+          PY
+
+      - name: Show comparison
+        if: always()
+        run: |
+          echo "=== FULL EQUITY SUMMARY ==="
+          cat research/v15-full-equity-results/full_equity_summary.csv 2>/dev/null || true
+          echo
+          echo "=== ERA COMPARISON ==="
+          cat research/v15-full-equity-results/full_equity_eras.csv 2>/dev/null || true
+          echo
+          echo "=== YEARLY SCREEN ==="
+          cat research/v15-full-equity-results/full_equity_yearly_screen.csv 2>/dev/null || true
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v15-full-equity-results
+          path: research/v15-full-equity-results/
+          if-no-files-found: warn
