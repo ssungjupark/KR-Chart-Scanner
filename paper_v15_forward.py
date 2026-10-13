@@ -441,7 +441,13 @@ def update_signal_status(signals: pd.DataFrame, signal_id: str, status: str, **v
     signals.loc[mask, "status"] = status
     for k, v in values.items():
         if k not in signals.columns:
-            signals[k] = np.nan
+            if isinstance(v, str):
+                signals[k] = pd.Series([None] * len(signals), index=signals.index, dtype="object")
+            else:
+                signals[k] = np.nan
+        elif isinstance(v, str) and not pd.api.types.is_object_dtype(signals[k].dtype):
+            # Empty CSV date columns are commonly inferred as float64 by pandas 3.
+            signals[k] = signals[k].astype("object")
         signals.loc[mask, k] = v
     return signals
 
@@ -455,10 +461,16 @@ def _portfolio_value(state: dict, d: pd.Timestamp, bundle: DataBundle, field: st
         stock = bundle.prices.get(p["ticker"])
         if stock is None:
             raise RuntimeError(f"Missing active-position price {p['ticker']}")
-        hist = stock.loc[:d, field]
-        if hist.empty:
-            raise RuntimeError(f"No mark for active position {p['ticker']} on {d.date()}")
-        stock_value += float(p["shares"]) * float(hist.iloc[-1])
+        if d in stock.index:
+            mark = float(stock.loc[d, field])
+        else:
+            hist = stock.loc[:d, "Close"]
+            if hist.empty:
+                raise RuntimeError(f"No mark for active position {p['ticker']} on {d.date()}")
+            # Match the historical replay: if a stock has no bar on a market day,
+            # carry its last observed close rather than its previous open.
+            mark = float(hist.iloc[-1])
+        stock_value += float(p["shares"]) * mark
     return index_value + stock_value, index_value, stock_value
 
 
