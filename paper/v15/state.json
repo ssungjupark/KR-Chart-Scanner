@@ -1,0 +1,14 @@
+{
+  "model_id": "V15_FORWARD_OOS_10PCT",
+  "spec_hash": "0b956a9532c142881550c15edc81076b18d9eb4ffa56f49d1b97ff4bb4f73814",
+  "oos_start_signal_date": "2026-10-14",
+  "initialized": false,
+  "initial_session": null,
+  "last_processed_market_date": null,
+  "last_signal_scan_date": null,
+  "index_units": null,
+  "benchmark_units": null,
+  "active_positions": [],
+  "pending_signals": [],
+  "next_signal_id": 1
+}
