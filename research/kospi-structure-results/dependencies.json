@@ -1,0 +1,6 @@
+{
+  "pandas": "2.2.3",
+  "numpy": "2.3.5",
+  "finance-datareader": "0.9.202",
+  "requests": "2.34.2"
+}

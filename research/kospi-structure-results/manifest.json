@@ -1,0 +1,33 @@
+{
+  "args": {
+    "signals": "research/kospi-long-results/v6_signals.csv",
+    "cache_dir": "data_kospi_long",
+    "output_dir": "research/kospi-structure-results"
+  },
+  "entry_signals": 1195,
+  "policies": [
+    "fixed20",
+    "swing_ma5",
+    "trend_ma20",
+    "trend_ma60",
+    "trailing_low10",
+    "ma20_only",
+    "ma60_only"
+  ],
+  "support": "minimum positive low of signal day and prior nine observations; trailing policy ratchets prior ten lows",
+  "pure_ma_controls": "ma20_only and ma60_only have no support stop",
+  "protocol_note": "Three pure/trailing controls added as component diagnostics after observing the initial four-policy run, not selected optimizations",
+  "maximum_hold": "none; open holdings marked at study end without sell cost",
+  "close_signal": "next executable open",
+  "gap_stop": "actual open if below support",
+  "one_price_bars": "conservatively no entry/fill; pending exit delayed",
+  "cost": 0.004,
+  "same_ticker_pyramiding": false,
+  "model_selection": "none",
+  "intraday_index": "daily closing proxy; no intraday index price is invented",
+  "entry_universe": "frozen V6 current-survivor entries, not historical full universe",
+  "sources_sha256": {
+    "v6_signals.csv": "e6adcf643e5448ce3eb507ac9b708fa259422af62b1857468e43a00b85eee025",
+    "KOSPI.csv.gz": "4f185f5a51df3b475678daf93d429442498319729270b30c3081034642f4a634"
+  }
+}

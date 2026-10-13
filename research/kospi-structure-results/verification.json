@@ -1,0 +1,8 @@
+{
+  "tests_passed": 38,
+  "original_exit_price_and_date_reproduction": 1195,
+  "independently_recomputed_real_trades": 120,
+  "baseline_pre2025_account_exact_match": true,
+  "rule_selection": "none",
+  "data_end": "2026-10-07"
+}

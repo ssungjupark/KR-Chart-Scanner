@@ -10,3 +10,5 @@ data_robustness_v8/
 data_kospi_long/
 data_kospi_amount/
 research/kospi-long-results/signals.csv.gz
+research/kospi-structure-results/trades.csv
+research/kospi-structure-results/equity_*.csv
