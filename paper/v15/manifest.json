@@ -1,0 +1,25 @@
+{
+  "model_id": "V15_FORWARD_OOS_10PCT",
+  "status": "armed_forward_oos",
+  "frozen_on_kst": "2026-10-13",
+  "first_eligible_signal_date": "2026-10-14",
+  "spec_hash": "0b956a9532c142881550c15edc81076b18d9eb4ffa56f49d1b97ff4bb4f73814",
+  "research_origin": "V15 generalized market-state candidate; Samsung Electronics and SK hynix excluded as direct trades",
+  "portfolio": {
+    "baseline": "100% KOSPI core",
+    "signal_substitution_weight": 0.10,
+    "max_positions": 10,
+    "strategic_cash": 0.0,
+    "leverage": false,
+    "entry": "next observed stock-session open after signal",
+    "exit": "20th observed stock-session close after signal",
+    "round_trip_cost_assumption": 0.004
+  },
+  "integrity_rules": [
+    "No signal dated before 2026-10-14 may enter the forward ledger",
+    "No historical signal backfill after a missed scan",
+    "Previously generated pending orders may be filled at their predetermined next observed open",
+    "No threshold tuning in the forward ledger",
+    "Any model change requires a new model_id and a new forward start date"
+  ]
+}
