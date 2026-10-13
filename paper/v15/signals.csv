@@ -1,0 +1,1 @@
+signal_id,signal_key,signal_date,ticker,name,status,signal_close,adv20,rs20,rs60,rs120,rs20_pctl,rs60_pctl,rs120_pctl,kospi_ret60,kospi_ret60_pctl756,liq_breadth60,liq_breadth60_pctl756,signal_weight,round_trip_cost,spec_hash,marcap_commit,liquidity_fallback_rows_run,decision_date,entry_date,entry_price,exit_date,exit_price,net_return,benchmark_return,excess_return

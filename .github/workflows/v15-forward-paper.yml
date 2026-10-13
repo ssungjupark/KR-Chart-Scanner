@@ -1,0 +1,98 @@
+name: V15 Forward OOS Paper
+
+on:
+  pull_request:
+    paths:
+      - "paper_v15_forward.py"
+      - "tests/test_paper_v15_forward.py"
+      - ".github/workflows/v15-forward-paper.yml"
+      - "paper/v15/**"
+  workflow_dispatch:
+  schedule:
+    # 18:30 KST, Monday-Friday. Running after the close gives data providers
+    # time to publish final daily bars and KRX-derived amount data.
+    - cron: "30 9 * * 1-5"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: v15-forward-oos-paper
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt requests pyarrow
+      - name: Validate frozen spec and unit tests
+        run: |
+          python paper_v15_forward.py --validate-config
+          python -m unittest tests.test_paper_v15_forward -v
+
+  live-paper:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt requests pyarrow
+      - name: Restore point-in-time forward data cache
+        uses: actions/cache@v4
+        with:
+          path: paper_cache/v15
+          key: v15-forward-oos-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            v15-forward-oos-${{ runner.os }}-
+      - name: Run frozen forward paper tracker
+        env:
+          TZ: Asia/Seoul
+        run: |
+          python paper_v15_forward.py --as-of "$(date +%F)"
+      - name: Verify frozen ledger invariants
+        run: |
+          python paper_v15_forward.py --validate-config
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import pandas as pd
+          import paper_v15_forward as f
+
+          s = json.loads(Path('paper/v15/state.json').read_text())
+          assert s['spec_hash'] == f.SPEC_HASH
+          assert s['oos_start_signal_date'] == '2026-10-14'
+          p = Path('paper/v15/portfolio.csv')
+          if p.exists() and p.stat().st_size:
+              x = pd.read_csv(p)
+              if len(x):
+                  assert ((x['total_equity_exposure'] - 1.0).abs() < 1e-9).all()
+          sig = Path('paper/v15/signals.csv')
+          if sig.exists() and sig.stat().st_size:
+              x = pd.read_csv(sig, dtype={'ticker': str})
+              if len(x):
+                  assert pd.to_datetime(x.signal_date).min() >= pd.Timestamp('2026-10-14')
+                  assert not x.signal_key.duplicated().any()
+          PY
+      - name: Commit immutable forward ledger update
+        run: |
+          git config user.name "v15-paper-bot"
+          git config user.email "v15-paper-bot@users.noreply.github.com"
+          git add paper/v15
+          if git diff --cached --quiet; then
+            echo "No ledger changes"
+          else
+            git commit -m "paper(v15): update forward OOS ledger [skip ci]"
+            git push origin HEAD:main
+          fi
