@@ -7,6 +7,13 @@ on:
       - "tests/test_paper_v15_forward.py"
       - ".github/workflows/v15-forward-paper.yml"
       - "paper/v15/**"
+  push:
+    branches: [main]
+    # Do not include paper/v15/** here: bot ledger commits must not recurse.
+    paths:
+      - "paper_v15_forward.py"
+      - "tests/test_paper_v15_forward.py"
+      - ".github/workflows/v15-forward-paper.yml"
   workflow_dispatch:
   schedule:
     # 18:30 KST, Monday-Friday. Running after the close gives data providers
