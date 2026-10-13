@@ -6,6 +6,18 @@ import pandas as pd
 import paper_v15_forward as fwd
 
 
+def signal_frame(status="pending_entry"):
+    # Mirror the persisted signals.csv schema. Date/status fields are explicitly
+    # object dtype so pandas 3 cannot infer a float column from an all-NaN seed.
+    return pd.DataFrame([{
+        "signal_id": "V15-000001", "signal_key": "2026-10-14|123456",
+        "signal_date": "2026-10-14", "ticker": "123456", "name": "A", "status": status,
+        "decision_date": None, "entry_date": None, "entry_price": np.nan,
+        "exit_date": None, "exit_price": np.nan, "net_return": np.nan,
+        "benchmark_return": np.nan, "excess_return": np.nan,
+    }])
+
+
 class V15ForwardPaperTests(unittest.TestCase):
     def test_frozen_start_and_parameters(self):
         self.assertEqual(fwd.OOS_START_SIGNAL_DATE, pd.Timestamp("2026-10-14"))
@@ -33,10 +45,7 @@ class V15ForwardPaperTests(unittest.TestCase):
 
     def test_duplicate_signal_is_not_appended(self):
         state = fwd._empty_state()
-        signals = pd.DataFrame([{
-            "signal_id": "V15-000001", "signal_key": "2026-10-14|123456",
-            "signal_date": "2026-10-14", "ticker": "123456", "name": "A", "status": "pending_entry",
-        }])
+        signals = signal_frame()
         state["next_signal_id"] = 2
         selected = pd.DataFrame([{
             "ticker": "123456", "name": "A", "Close": 100.0, "ADV20": 3e9,
@@ -63,10 +72,7 @@ class V15ForwardPaperTests(unittest.TestCase):
             "benchmark_units": 1.0 / (100.0 * (1 + fwd.SIDE_COST)),
             "pending_signals": [{"signal_id": "V15-000001", "ticker": "123456", "name": "A", "signal_date": str(dates[0].date())}],
         })
-        signals = pd.DataFrame([{
-            "signal_id": "V15-000001", "signal_key": f"{dates[0].date()}|123456",
-            "signal_date": str(dates[0].date()), "ticker": "123456", "name": "A", "status": "pending_entry",
-        }])
+        signals = signal_frame()
         trades = pd.DataFrame(columns=["signal_id"])
         before_units = state["index_units"]
         state, signals, trades, row = fwd.process_market_day(dates[1], state, bundle, signals, trades)
@@ -91,10 +97,7 @@ class V15ForwardPaperTests(unittest.TestCase):
                 "target_exit_date": str(dates[20].date()), "benchmark_entry_open": 100.0,
             }],
         })
-        signals = pd.DataFrame([{
-            "signal_id": "V15-000001", "signal_key": f"{dates[0].date()}|123456",
-            "signal_date": str(dates[0].date()), "ticker": "123456", "name": "A", "status": "active",
-        }])
+        signals = signal_frame(status="active")
         trades = pd.DataFrame(columns=["signal_id"])
         state, signals, trades, row = fwd.process_market_day(dates[20], state, bundle, signals, trades)
         self.assertEqual(len(state["active_positions"]), 0)
