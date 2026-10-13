@@ -22,6 +22,8 @@ A signal generated at a completed close enters at the next observed stock-sessio
 - `portfolio.csv`: daily fully-invested overlay NAV vs KOSPI NAV.
 - `latest.md`: human-readable current status.
 
+The signal ledger has an explicit stable schema so blank date fields cannot be re-inferred as numeric columns between scheduled runs.
+
 ## OOS integrity
 
 The workflow never creates signals dated before 2026-10-14 and does not backfill a missed historical signal after a later market session has completed. Orders that were already generated before their entry session may still be filled from their predetermined next observed open if the workflow itself was delayed. Any threshold/model change requires a new model id, a new spec hash and a new forward start date.
