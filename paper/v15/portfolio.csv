@@ -1,1 +1,2 @@
-date,overlay_nav,kospi_nav
+date,overlay_nav,kospi_nav,relative_nav,excess_since_start,index_exposure,signal_stock_exposure,total_equity_exposure,active_positions
+2026-10-14,0.9892341188610955,0.9892341188610955,1.0,0.0,1.0,0.0,1.0,0.0
